@@ -7,9 +7,9 @@ import signal
 
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5000
-BUFFER_SIZE = 1024
+BUFFER_SIZE = 4096
 NUMS_PART = 4
-TIMEOUT = 1  # Timeout for waiting for ACK
+TIMEOUT = 5  # Timeout for waiting for ACK
 HEADER_FORMAT = '>H B'
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
@@ -99,7 +99,7 @@ def recv_part(server_addr, file_name, file_size, part_size, part_index):
 
             # Calculate the percentage of the file received
             percent = (received / part_size) * 100
-            # print(f"Received {received}/{part_size} bytes ({percent:.2f}%)")
+            print(f"Received {received}/{part_size} bytes ({percent:.2f}%)")
         
         print(f">> file_name: {file_name}, part_index: {part_index} has been received!")
         
@@ -113,7 +113,7 @@ def start_client():
     sequence_number = [0, 1]
 
     # Request the file name from the server
-    file_name = "server_1.txt"  # Replace with the file name you want to download
+    file_name = "30mb.zip"  # Replace with the file name you want to download
     send_msg(client_socket, server_addr, file_name.encode('utf-8'), sequence_number)
     
     # Receive file size and part_size information from the server

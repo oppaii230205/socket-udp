@@ -6,11 +6,12 @@ import threading
 
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5000
-BUFFER_SIZE = 1024
-TIMEOUT = 1  # Timeout for waiting for ACK
+BUFFER_SIZE = 4096
+TIMEOUT = 5  # Timeout for waiting for ACK
 NUMS_PART = 4
 HEADER_FORMAT = '>H B'
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+SERVER_ID = 1
 
 def calculate_checksum(data):
     checksum = 0
@@ -86,7 +87,7 @@ def send_part(server_socket, addr, file_name, file_size, part_size, part_index, 
         while len(data) < part_size:
             # Read a chunk of the file (BUFFER_SIZE - 3 for headers)
             chunk = f.read(min(part_size - len(data), BUFFER_SIZE - 3))
-            print(chunk)
+            # print(chunk)
             # If chunk is empty (end of file), break
             if not chunk:
                 break
@@ -101,69 +102,77 @@ def send_part(server_socket, addr, file_name, file_size, part_size, part_index, 
         print(f">> file_name: {file_name}, part_index: {part_index} has been sent!")
         
 
-def start_server():
-    server_socket = socket(AF_INET, SOCK_DGRAM)
-    server_socket.bind((SERVER_HOST, SERVER_PORT))
-    print(f"Server is listening on {SERVER_HOST}:{SERVER_PORT}")
+def handle_client(server_socket, client_addr, msg):
+    # server_socket = socket(AF_INET, SOCK_DGRAM)
+    # server_socket.bind((SERVER_HOST, SERVER_PORT))
+    # print(f"Server is listening on {SERVER_HOST}:{SERVER_PORT}")
     # sequence_number = [0, 1]  # Initialize sequence number to 0
 
-    while True:
-        try:
-            # Receive the requested file name from the client
-            sequence_number = [0, 1]  # Initialize sequence number to 0
+    try:
+        # Receive the requested file name from the client
+        sequence_number = [0, 1]  # Initialize sequence number to 0
 
-            msg, client_addr = recv_msg(server_socket, sequence_number)
-            argument_list = msg.decode('utf-8').split(',')
+        # msg, client_addr = recv_msg(server_socket, sequence_number)
+        argument_list = msg.decode('utf-8').split(',')
 
-            # file_name and part_index received
-            if len(argument_list) == 2:
-                file_name = argument_list[0]
-                part_index = int(argument_list[1])
+        # file_name and part_index received
+        if len(argument_list) == 2:
+            file_name = argument_list[0]
+            part_index = int(argument_list[1])
 
-                # Check if file exists and send the file size
-                if os.path.exists(file_name):
-                    file_size = os.path.getsize(file_name)
-                    part_size = file_size // NUMS_PART
-                    # msg = f"{file_size}, {part_size}".encode('utf-8')
-                    # send_msg(server_socket, client_addr, msg, sequence_number)
-                    # print(f"file_name: {file_name}, part_index: {part_index}")
-                    
-                    send_part(server_socket, client_addr, file_name, file_size, part_size, part_index, sequence_number)
-                                        
-                    # print(f"File {file_name} sent to {client_addr} successfully.")
-                else:
-                    print(f"File {file_name} not found.")
-                    send_msg(server_socket, client_addr, b"File not found", sequence_number)
+            # Check if file exists and send the file size
+            if os.path.exists(file_name):
+                file_size = os.path.getsize(file_name)
+                part_size = file_size // NUMS_PART
+                # msg = f"{file_size}, {part_size}".encode('utf-8')
+                # send_msg(server_socket, client_addr, msg, sequence_number)
+                # print(f"file_name: {file_name}, part_index: {part_index}")
+                
+                send_part(server_socket, client_addr, file_name, file_size, part_size, part_index, sequence_number)
+                                    
+                # print(f"File {file_name} sent to {client_addr} successfully.")
+            else:
+                print(f"File {file_name} not found.")
+                send_msg(server_socket, client_addr, b"File not found", sequence_number)
 
-            # Just file_name received
-            elif len(argument_list) == 1:
-                file_name = argument_list[0]
+        # Just file_name received
+        elif len(argument_list) == 1:
+            file_name = argument_list[0]
 
-                # Check if file exists and send the file size
-                if os.path.exists(file_name):
-                    file_size = os.path.getsize(file_name)
-                    part_size = file_size // NUMS_PART
-                    msg = f"{file_size},{part_size}".encode('utf-8')
-                    send_msg(server_socket, client_addr, msg, sequence_number)
-                    # print(f"Sending file size {file_size} bytes, part size {part_size} bytes")
+            # Check if file exists and send the file size
+            if os.path.exists(file_name):
+                file_size = os.path.getsize(file_name)
+                part_size = file_size // NUMS_PART
+                msg = f"{file_size},{part_size}".encode('utf-8')
+                send_msg(server_socket, client_addr, msg, sequence_number)
+                # print(f"Sending file size {file_size} bytes, part size {part_size} bytes")
 
-                    # print(f"File {file_name} sent to {client_addr} successfully.")
-                else:
-                    print(f"File {file_name} not found.")
-                    send_msg(server_socket, client_addr, b"File not found", sequence_number)
+                # print(f"File {file_name} sent to {client_addr} successfully.")
+            else:
+                print(f"File {file_name} not found.")
+                send_msg(server_socket, client_addr, b"File not found", sequence_number)
 
-        except Exception as e:
-            print(f"Server error: {e}")
-            continue
+    except Exception as e:
+        print(f"Server error: {e}")
+        
 
-'''
+
 def start_server():
+    global SERVER_ID
     server_socket = socket(AF_INET, SOCK_DGRAM)
     server_socket.bind((SERVER_HOST, SERVER_PORT))
     print(f"Server is listening on {SERVER_HOST}:{SERVER_PORT}")
 
     while True:
-'''
+        sequence_number = [0, 1]  # Initialize sequence number to 0
+
+        msg, client_addr = recv_msg(server_socket, sequence_number)
+        
+        sub_server_socket = socket(AF_INET, SOCK_DGRAM)
+        sub_server_socket.bind((SERVER_HOST, SERVER_PORT + SERVER_ID))
+        SERVER_ID += 1
+        client_handler = threading.Thread(target=handle_client, args=(sub_server_socket, client_addr, msg))
+        client_handler.start()
 
 if __name__ == "__main__":
     start_server()
