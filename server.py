@@ -1,32 +1,28 @@
+from fileinput import filename
 import os
 from socket import socket, AF_INET, SOCK_DGRAM
 from socket import timeout
 import struct
 import threading
+import hashlib
+import sys
 
-SERVER_HOST = 'localhost'
+SERVER_HOST = '0.0.0.0'
 SERVER_PORT = 5000
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 1024
 TIMEOUT = 5  # Timeout for waiting for ACK
-NUMS_PART = 4
+NUM_PARTS = 4
 HEADER_FORMAT = '>H B'
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 SERVER_ID = 1
 
 def calculate_checksum(data):
-    checksum = 0
-    # Divide data into 16-bit words
-    for i in range(0, len(data), 2):
-        if i + 1 < len(data):
-            word = (data[i] << 8) + data[i + 1]  # Combine 2 bytes into a 16-bit word
-        else:
-            word = data[i] << 8  # Last byte, padded with a 0
-        checksum += word
-        # Handle overflow by wrapping around
-        checksum = (checksum & 0xFFFF) + (checksum >> 16)
-
-    # Take the one's complement
-    return ~checksum & 0xFFFF
+    # Tạo MD5 hash của dữ liệu
+    hash_bytes = hashlib.md5(data).digest()  # MD5 trả về 16 bytes
+    # Lấy 2 byte đầu tiên của MD5 và chuyển thành số nguyên 16-bit
+    short_checksum = int.from_bytes(hash_bytes[:2], byteorder='big')
+    # Đảm bảo giá trị nằm trong phạm vi 16-bit
+    return ~short_checksum & 0xFFFF
 
 def unpack(packet):
     packet_header = packet[:HEADER_SIZE]
@@ -36,8 +32,6 @@ def unpack(packet):
 
 def send_msg(sock, addr, data, sequence_number):
     check_sum = calculate_checksum(sequence_number[0].to_bytes(1, byteorder='big') + data)
-    #packet = check_sum.to_bytes(2, byteorder='big') + sequence_number[0].to_bytes(1, byteorder='big') + data
-    #Prefix message with 2-byte(H) check_sum and 1-byte(B) sequence_number
     packet = struct.pack(HEADER_FORMAT, check_sum, sequence_number[0]) + data
     while True:
         sock.sendto(packet, addr)
@@ -77,10 +71,10 @@ def send_part(server_socket, addr, file_name, file_size, part_size, part_index, 
      with open(file_name, mode='rb') as f:
         f.seek(part_index * part_size) # Always seek to the right position, check part_size later        
 
-        print(f">> file_name: {file_name}, part_index: {part_index} is going to be sent!")
+        #print(f">> file_name: {file_name}, part_index: {part_index} is going to be sent!")
 
 
-        if part_index == NUMS_PART - 1:
+        if part_index == NUM_PARTS - 1:
             part_size = file_size - part_index * part_size
 
         data = bytearray()
@@ -99,7 +93,7 @@ def send_part(server_socket, addr, file_name, file_size, part_size, part_index, 
             # Display progress
             # print(f"Sent {len(data)}/{part_size} bytes.")
         
-        print(f">> file_name: {file_name}, part_index: {part_index} has been sent!")
+        #print(f">> file_name: {file_name}, part_index: {part_index} has been sent!")
         
 
 def handle_client(server_socket, client_addr, msg):
@@ -123,7 +117,7 @@ def handle_client(server_socket, client_addr, msg):
             # Check if file exists and send the file size
             if os.path.exists(file_name):
                 file_size = os.path.getsize(file_name)
-                part_size = file_size // NUMS_PART
+                part_size = file_size // NUM_PARTS
                 # msg = f"{file_size}, {part_size}".encode('utf-8')
                 # send_msg(server_socket, client_addr, msg, sequence_number)
                 # print(f"file_name: {file_name}, part_index: {part_index}")
@@ -139,18 +133,30 @@ def handle_client(server_socket, client_addr, msg):
         elif len(argument_list) == 1:
             file_name = argument_list[0]
 
+            if file_name == "start":
+                file_size = os.path.getsize("input.txt")
+                send_msg(server_socket, client_addr,str(file_size).encode('utf8'), sequence_number)
+                with open("input.txt", 'rb') as file:
+                    data = b''
+                    while len(data) < file_size:
+                        chunk = file.read(BUFFER_SIZE-3)
+                        data += chunk
+                        send_msg(server_socket, client_addr, chunk, sequence_number)
+                    
             # Check if file exists and send the file size
-            if os.path.exists(file_name):
-                file_size = os.path.getsize(file_name)
-                part_size = file_size // NUMS_PART
-                msg = f"{file_size},{part_size}".encode('utf-8')
-                send_msg(server_socket, client_addr, msg, sequence_number)
-                # print(f"Sending file size {file_size} bytes, part size {part_size} bytes")
-
-                # print(f"File {file_name} sent to {client_addr} successfully.")
             else:
-                print(f"File {file_name} not found.")
-                send_msg(server_socket, client_addr, b"File not found", sequence_number)
+                if os.path.exists(file_name):
+                    file_size = os.path.getsize(file_name)
+                    part_size = file_size // NUM_PARTS
+                    msg = f"{file_size},{part_size}".encode('utf-8')
+                    send_msg(server_socket, client_addr, msg, sequence_number)
+                    print(f"{file_name} is going to be sent!")
+                    # print(f"Sending file size {file_size} bytes, part size {part_size} bytes")
+
+                    # print(f"File {file_name} sent to {client_addr} successfully.")
+                else:
+                    print(f"File {file_name} not found.")
+                    send_msg(server_socket, client_addr, b"File not found,0", sequence_number)
 
     except Exception as e:
         print(f"Server error: {e}")
@@ -165,9 +171,7 @@ def start_server():
 
     while True:
         sequence_number = [0, 1]  # Initialize sequence number to 0
-
         msg, client_addr = recv_msg(server_socket, sequence_number)
-        
         sub_server_socket = socket(AF_INET, SOCK_DGRAM)
         sub_server_socket.bind((SERVER_HOST, SERVER_PORT + SERVER_ID))
         SERVER_ID += 1

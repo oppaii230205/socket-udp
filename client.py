@@ -4,34 +4,36 @@ from socket import timeout
 import struct
 import threading
 import signal
+import hashlib
+import sys
+from colorama import init, Cursor
 
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5000
-BUFFER_SIZE = 4096
-NUMS_PART = 4
+BUFFER_SIZE = 1024
+NUM_PARTS = 4
 TIMEOUT = 5  # Timeout for waiting for ACK
 HEADER_FORMAT = '>H B'
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+FILE_ID = 0
+NUM_OF_LINE = 0
+init()
+
+def gotoxy(x,y):
+    sys.stdout.write(Cursor.POS(x, y))
 
 def calculate_checksum(data):
-    checksum = 0
-    # Divide data into 16-bit words
-    for i in range(0, len(data), 2):
-        if i + 1 < len(data):
-            word = (data[i] << 8) + data[i + 1]  # Combine 2 bytes into a 16-bit word
-        else:
-            word = data[i] << 8  # Last byte, padded with a 0
-        checksum += word
-        # Handle overflow by wrapping around
-        checksum = (checksum & 0xFFFF) + (checksum >> 16)
-
-    # Take the one's complement
-    return ~checksum & 0xFFFF
-
+    """Calculate a 16-bit checksum using hashlib (MD5)."""
+    # Tạo MD5 hash của dữ liệu
+    hash_bytes = hashlib.md5(data).digest()  # MD5 trả về 16 bytes
+    # Lấy 2 byte đầu tiên của MD5 và chuyển thành số nguyên 16-bit
+    short_checksum = int.from_bytes(hash_bytes[:2], byteorder='big')
+    # Đảm bảo giá trị nằm trong phạm vi 16-bit
+    return ~short_checksum & 0xFFFF
+ 
 
 def send_msg(sock, addr, data, sequence_number):
     check_sum = calculate_checksum(sequence_number[0].to_bytes(1, byteorder='big') + data)
-    #packet = check_sum.to_bytes(2, byteorder='big') + sequence_number[0].to_bytes(1, byteorder='big') + data
     packet = struct.pack(HEADER_FORMAT, check_sum, sequence_number[0]) + data
     while True:
         sock.sendto(packet, addr)
@@ -60,7 +62,6 @@ def recv_msg(sock, sequence_number):
             received_checksum, seq_num, data = unpack(packet)
             if received_checksum == calculate_checksum(seq_num.to_bytes(1, byteorder='big') + data):
                 ack_checksum = calculate_checksum(seq_num.to_bytes(1, byteorder='big'))
-                #ack_packet = ack_checksum.to_bytes(2, byteorder='big') + seq_num.to_bytes(1, byteorder='big')
                 ack_packet = struct.pack(HEADER_FORMAT,ack_checksum, seq_num)
                 sock.sendto(ack_packet, sender_addr)
                 if seq_num != sequence_number[1]:
@@ -71,7 +72,7 @@ def recv_msg(sock, sequence_number):
 
 def recv_part(server_addr, file_name, file_size, part_size, part_index):
     child_client_socket = socket(AF_INET, SOCK_DGRAM) 
-    
+    global FILE_ID, NUM_OF_LINE
     sequence_number = [0, 1]  # Initialize sequence number to 0
 
     # Send "file_name,part_index" to server
@@ -82,16 +83,13 @@ def recv_part(server_addr, file_name, file_size, part_size, part_index):
     with open(client_filename[0]+"_client."+client_filename[1], 'r+b') as f:
         f.seek(part_index * part_size) # Always seek to the right position, check part_size later
         
-        print(f">> file_name: {file_name}, part_index: {part_index} is going to be received!")
-
-        if part_index == NUMS_PART - 1:
+        if part_index == NUM_PARTS - 1:
             part_size = file_size - part_index * part_size
 
         received = 0
         while received < part_size:
             # Receive the next chunk of the file
             chunk, _ = recv_msg(child_client_socket, sequence_number)
-            # print(f"part_index: {part_index}: {chunk}")
             if not chunk:
                 break
             f.write(chunk)
@@ -99,47 +97,87 @@ def recv_part(server_addr, file_name, file_size, part_size, part_index):
 
             # Calculate the percentage of the file received
             percent = (received / part_size) * 100
-            print(f"Received {received}/{part_size} bytes ({percent:.2f}%)")
-        
-        print(f">> file_name: {file_name}, part_index: {part_index} has been received!")
+            
+            gotoxy(1,NUM_OF_LINE + (part_index + 1 + 10 * FILE_ID + 1))
+            print(f"Part {part_index} Received {received}/{part_size} bytes ({percent:.2f}%)")
         
     child_client_socket.close()
 
 
+def print_server_text(data):
+    os.system('cls')
+    print(">> ----------  DOWLOAD LIST  -------- <<")
+    print(data)
+    print(">> ---------------------------------- <<")
 def start_client():
     client_socket = socket(AF_INET, SOCK_DGRAM)
     server_addr = (SERVER_HOST, SERVER_PORT)
+    try:
+        global FILE_ID, NUM_OF_LINE
+        sequence_number = [0, 1]
 
-    sequence_number = [0, 1]
+        # Request the file name from the server
+        file_name = "start"  # Replace with the file name you want to download
+        send_msg(client_socket, server_addr, file_name.encode('utf-8'), sequence_number)
+    
+        msg, _ =recv_msg(client_socket, sequence_number)
+        file_size = int(msg.decode('utf8'))
+        data=b''
+        with open("Data_Server.txt", 'wb') as file:
+            while len(data) < file_size:
+                chunk, _ = recv_msg(client_socket, sequence_number)
+                file.write(chunk)
+                data += chunk
+        data = data.decode('utf8')
+        with open("Data_Server.txt", 'rb') as file:
+            while True:
+                file_name = file.readline()
+                if not file_name:
+                    break
+                NUM_OF_LINE += 1
+        NUM_OF_LINE += 3
+        print_server_text(data)
+        # Receive file size and part_size information from the server
+        with open('input.txt', 'r', encoding='utf8') as file:
+            while True:
+                try:
+                    file_name = file.readline()
+                    if not file_name:
+                        break
+                
+                    file_name = file_name.strip()
+                    sequence_number = [0, 1]
+                    send_msg(client_socket, server_addr, file_name.encode('utf-8'), sequence_number)
+                    msg, _ = recv_msg(client_socket, sequence_number)
+                    file_size, part_size = map(int, msg.decode('utf-8').split(','))
 
-    # Request the file name from the server
-    file_name = "30mb.zip"  # Replace with the file name you want to download
-    send_msg(client_socket, server_addr, file_name.encode('utf-8'), sequence_number)
-    
-    # Receive file size and part_size information from the server
-    msg, _ = recv_msg(client_socket, sequence_number)
-    # print('Da nhan file size and part size')
-    file_size, part_size = map(int, msg.decode('utf-8').split(','))
-    # print(f"File size: {file_size} bytes, part size: {part_size} bytes")
-    
-    client_socket.close()
-    
-    client_filename = file_name.split('.')
-    with open(client_filename[0]+"_client."+client_filename[1], 'wb') as f:
-        f.truncate(file_size)
+                    gotoxy(1,NUM_OF_LINE + (10 * FILE_ID + 1))
+                    print(f"{file_name} is going to be dowloaded")
+                    #client_filename = file_name.split('.')
+                    with open(file_name, 'wb') as f:
+                        f.truncate(file_size)
 
-    threads = []
-    for part_index in range(NUMS_PART):
-        thread = threading.Thread(target=recv_part, args=(server_addr, file_name, file_size, part_size, part_index))
-        thread.start()
-        threads.append(thread)
+                    threads = []
+                    for part_index in range(NUM_PARTS):
+                        thread = threading.Thread(target=recv_part, args=(server_addr, file_name, file_size, part_size, part_index))
+                        thread.start()
+                        threads.append(thread)
         
-    for thread in threads:
-        thread.join()  # Wait for all threads to complete
+                    for thread in threads:
+                        thread.join()  # Wait for all threads to complete
+                    gotoxy(1,NUM_OF_LINE + (5 + 10 * FILE_ID + 1))
+                    print(f"File {file_name} downloaded successfully.\n")
+                    FILE_ID += 1
+                    if FILE_ID >= 2:
+                        FILE_ID = 0
+                        print_server_text(data)                 
 
-
-    print(f"File {file_name} downloaded successfully.")
-
+                except:
+                    print(file_name,"not found")
+                    continue
+    except:
+        print("Error")
+        client_socket.close()
 
 if __name__ == "__main__":
     start_client()
