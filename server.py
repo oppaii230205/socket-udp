@@ -134,9 +134,9 @@ def handle_client(server_socket, client_addr, msg):
             file_name = argument_list[0]
 
             if file_name == "start":
-                file_size = os.path.getsize("input.txt")
+                file_size = os.path.getsize("text.txt")
                 send_msg(server_socket, client_addr,str(file_size).encode('utf8'), sequence_number)
-                with open("input.txt", 'rb') as file:
+                with open("text.txt", 'rb') as file:
                     data = b''
                     while len(data) < file_size:
                         chunk = file.read(BUFFER_SIZE-3)
