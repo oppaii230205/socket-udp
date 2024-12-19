@@ -8,7 +8,7 @@ import hashlib
 import sys
 from colorama import init, Cursor
 
-SERVER_HOST = 'localhost'
+SERVER_HOST = '192.168.247.129'
 SERVER_PORT = 5000
 BUFFER_SIZE = 1024
 NUM_PARTS = 4
@@ -79,8 +79,7 @@ def recv_part(server_addr, file_name, file_size, part_size, part_index):
     send_msg(child_client_socket, server_addr, f"{file_name},{part_index}".encode('utf-8'), sequence_number)
 
     # Open the file for writing and ensure it is empty
-    client_filename = file_name.split('.')
-    with open(client_filename[0]+"_client."+client_filename[1], 'r+b') as f:
+    with open(file_name, 'r+b') as f:
         f.seek(part_index * part_size) # Always seek to the right position, check part_size later
         
         if part_index == NUM_PARTS - 1:
@@ -153,7 +152,7 @@ def start_client():
 
                     gotoxy(1,NUM_OF_LINE + (10 * FILE_ID + 1))
                     print(f"{file_name} is going to be dowloaded")
-                    #client_filename = file_name.split('.')
+
                     with open(file_name, 'wb') as f:
                         f.truncate(file_size)
 
